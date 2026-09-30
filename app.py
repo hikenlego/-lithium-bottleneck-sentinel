@@ -106,18 +106,18 @@ if st.session_state.selected_route_id is not None:
         st.session_state.selected_route_id = None
         st.rerun()
 
-# pydeck 렌더링용 데이터셋 구성 (선택 여부에 따른 가변 색상/굵기)
+# pydeck 렌더링용 데이터셋 구성
 processed_routes = []
 for r in route_data:
     if st.session_state.selected_route_id is None:
-        color = r["base_color"] + [220] # 알파값(불투명도) 220
-        width = 45000 # 미터 단위 선 두께
+        color = r["base_color"] + [220]
+        width = 45000
     else:
         if r["id"] == st.session_state.selected_route_id:
             color = r["base_color"] + [255]
-            width = 90000 # 선택된 항로 강조
+            width = 90000
         else:
-            color = [180, 180, 180, 50] # 비선택 항로는 흐린 회색 투명 처리
+            color = [180, 180, 180, 50]
             width = 25000
     
     processed_routes.append({
@@ -158,7 +158,6 @@ scatter_layer = pdk.Layer(
     pickable=True
 )
 
-# 기본 뷰포트 (한국과 호주가 한 화면에 안정적으로 들어오는 초기 중심점)
 initial_view_state = pdk.ViewState(
     longitude=120.0,
     latitude=8.0,
@@ -166,13 +165,14 @@ initial_view_state = pdk.ViewState(
     pitch=0
 )
 
-# 맵 렌더링 (st.pydeck_chart는 GPU 기반 벡터 렌더러로 새로고침 깜빡임 없음)
+# 토큰 불필요 무료 Carto 타일 스타일 적용
 st.pydeck_chart(
     pdk.Deck(
         layers=[path_layer, scatter_layer],
         initial_view_state=initial_view_state,
         tooltip={"text": "{name}\n{info}"},
-        map_style="mapbox://styles/mapbox/light-v9"
+        map_provider="carto",
+        map_style="light"
     )
 )
 
