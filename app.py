@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pydeck as pdk
+import streamlit.components.v1 as components
 import requests
 import json
 
@@ -12,6 +12,29 @@ st.set_page_config(
     page_title="리튬 공급망 조달 병목 대응 의사결정 시스템",
     layout="wide"
 )
+
+# 세련된 UI 스타일링 (대형 카드 버튼 및 슬라이드 컨테이너)
+st.markdown("""
+<style>
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem;
+    }
+    .route-card {
+        padding: 20px;
+        border-radius: 12px;
+        background: #f8f9fa;
+        border-left: 6px solid #3498db;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        margin-top: 15px;
+        margin-bottom: 20px;
+        animation: slideDown 0.3s ease-out;
+    }
+    @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
+""", unsafe_allow_html=True)
 
 st.title("배터리 리튬 공급망 실시간 외생 병목 모니터링 & SCM 최적화 대시보드")
 st.markdown("호주 포트헤들랜드 선석 과포화 및 기상 변동 - 중국 제련 고집중 - 한국 양극재 클러스터 연계")
@@ -38,10 +61,9 @@ holding_cost_rate = st.sidebar.slider(
 ) / 100.0
 
 # ---------------------------------------------------------
-# 1. 해상 운송 거점별 경로 및 최적 대안 추천 (부분 렌더링 최적화)
+# 1. 해상 운송 거점별 경로 및 대형 추천 버튼 (인터랙티브 슬라이드)
 # ---------------------------------------------------------
 st.header("1. 해상 운송 거점별 경로 및 최적 대안 추천")
-st.caption("카드의 상단 버튼을 클릭하면 지도가 새로고침되지 않고 해당 항로 선만 즉각 강조됩니다.")
 
 if "selected_route_id" not in st.session_state:
     st.session_state.selected_route_id = None
@@ -50,131 +72,186 @@ if "selected_route_id" not in st.session_state:
 route_data = [
     {
         "id": 0,
+        "title": "최단 리드타임 추천",
         "name": "한-호 직항 장기운송계약(COA) 전용선",
         "vessel_type": "Supramax 55,000 DWT",
+        "route_desc": "호주 포트헤들랜드 선적 -> 한국 광양 직항 입항 (지정 전용 선석)",
         "lead_time": 14,
         "reliability": 94.5,
         "freight": 42.0,
-        "base_color": [46, 204, 113],
-        "path": [[118.576, -20.3167], [127.697, 34.9754]]
+        "color": "#2ecc71",
+        "summary": "우기 사이클론 시즌 및 선석 체선 리스크를 최소화하여 공장 셧다운을 완벽 방어하는 최우선 안정 항로입니다.",
+        "coords": [[-20.3167, 118.576], [34.9754, 127.697]]
     },
     {
         "id": 1,
+        "title": "최고 정시성 추천",
         "name": "중국 제련 톨링 경유 정기선",
         "vessel_type": "Ultramax 62,000 DWT",
+        "route_desc": "호주 포트헤들랜드 -> 중국 닝보 기항 (정기 컨테이너/벌크 셔틀)",
         "lead_time": 18,
         "reliability": 88.0,
         "freight": 33.5,
-        "base_color": [52, 152, 219],
-        "path": [[118.576, -20.3167], [121.544, 29.8683]]
+        "color": "#3498db",
+        "summary": "중국 내 가공 위탁 라인과 연계된 안정적 스케줄 항로이나, 통상 규제(FEOC) 시 대체 전환 조치가 필요합니다.",
+        "coords": [[-20.3167, 118.576], [29.8683, 121.544]]
     },
     {
         "id": 2,
+        "title": "최저 운임 추천",
         "name": "스팟 시장 자유 용선 (동남아 환적)",
         "vessel_type": "Handymax 45,000 DWT",
+        "route_desc": "호주 -> 싱가포르항 환적 -> 한국 광양 (스팟 용선 부킹)",
         "lead_time": 24,
         "reliability": 76.2,
         "freight": 28.0,
-        "base_color": [231, 76, 60],
-        "path": [[118.576, -20.3167], [103.8198, 1.3521], [127.697, 34.9754]]
+        "color": "#e74c3c",
+        "summary": "톤당 운임이 가장 경제적이나, 환적 대기와 비정기선 특성상 리드타임 변동성이 크게 발생하는 옵션입니다.",
+        "coords": [[-20.3167, 118.576], [1.3521, 103.8198], [34.9754, 127.697]]
     }
 ]
 
-ports_data = [
-    {"name": "호주 포트헤들랜드 (선적항)", "coordinates": [118.576, -20.3167], "color": [243, 156, 18]},
-    {"name": "중국 닝보항 (제련 거점)", "coordinates": [121.544, 29.8683], "color": [52, 152, 219]},
-    {"name": "한국 광양항 (양하항)", "coordinates": [127.697, 34.9754], "color": [46, 204, 113]},
-    {"name": "싱가포르항 (환적 거점)", "coordinates": [103.8198, 1.3521], "color": [155, 89, 182]}
-]
+# 큼직한 상단 추천 버튼 3개 배치
+col1, col2, col3 = st.columns(3)
 
-# st.fragment를 사용하여 추천 버튼과 지도 영역만 독립 갱신 (전체 페이지 리프레시 방지)
-@st.fragment
-def render_interactive_map():
-    col1, col2, col3 = st.columns(3)
+with col1:
+    btn_0_type = "primary" if st.session_state.selected_route_id == 0 else "secondary"
+    if st.button("🚀 최단 리드타임 추천\n\n(14일 직항 COA)", use_container_width=True, type=btn_0_type):
+        st.session_state.selected_route_id = 0
 
-    with col1:
-        if st.button("최단 리드타임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 0 else "secondary"):
-            st.session_state.selected_route_id = 0
-        st.metric(route_data[0]["name"], f"{route_data[0]['lead_time']} 일")
-        st.caption(f"운임: ${route_data[0]['freight']}/톤 | 정시성: {route_data[0]['reliability']}%")
+with col2:
+    btn_1_type = "primary" if st.session_state.selected_route_id == 1 else "secondary"
+    if st.button("⏱️ 최고 정시성 추천\n\n(94.5% 톨링 정기선)", use_container_width=True, type=btn_1_type):
+        st.session_state.selected_route_id = 1
 
-    with col2:
-        if st.button("최고 정시성 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 1 else "secondary"):
-            st.session_state.selected_route_id = 1
-        st.metric(route_data[1]["name"], f"{route_data[1]['reliability']} %")
-        st.caption(f"리드타임: {route_data[1]['lead_time']}일 | 운임: ${route_data[1]['freight']}/톤")
+with col3:
+    btn_2_type = "primary" if st.session_state.selected_route_id == 2 else "secondary"
+    if st.button("💰 최저 운임 추천\n\n($28.0/톤 스팟 환적)", use_container_width=True, type=btn_2_type):
+        st.session_state.selected_route_id = 2
 
-    with col3:
-        if st.button("최저 운임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 2 else "secondary"):
-            st.session_state.selected_route_id = 2
-        st.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤")
-        st.caption(f"리드타임: {route_data[2]['lead_time']}일 | 정시성: {route_data[2]['reliability']}%")
+# 버튼 클릭 시 아래로 슬라이드 다운되는 상세 제원 패널
+if st.session_state.selected_route_id is not None:
+    curr = route_data[st.session_state.selected_route_id]
+    st.markdown(f"""
+    <div class="route-card" style="border-left-color: {curr['color']};">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin:0; color: #2c3e50;">📌 {curr['title']} : {curr['name']}</h3>
+            <span style="background-color: {curr['color']}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.9rem; font-weight: bold;">선택된 최적 대안</span>
+        </div>
+        <p style="margin: 8px 0 16px 0; color: #7f8c8d; font-size: 1.05rem;">{curr['route_desc']} (투입 선형: <b>{curr['vessel_type']}</b>)</p>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 12px;">
+            <div style="background: white; padding: 12px; border-radius: 8px; border: 1px solid #e1e8ed;">
+                <div style="font-size: 0.85rem; color: #7f8c8d;">조달 소요 일수 (리드타임)</div>
+                <div style="font-size: 1.6rem; font-weight: bold; color: #2c3e50;">{curr['lead_time']} 일</div>
+            </div>
+            <div style="background: white; padding: 12px; border-radius: 8px; border: 1px solid #e1e8ed;">
+                <div style="font-size: 0.85rem; color: #7f8c8d;">운항 정시성 지수</div>
+                <div style="font-size: 1.6rem; font-weight: bold; color: #2c3e50;">{curr['reliability']} %</div>
+            </div>
+            <div style="background: white; padding: 12px; border-radius: 8px; border: 1px solid #e1e8ed;">
+                <div style="font-size: 0.85rem; color: #7f8c8d;">해상 운임 지표</div>
+                <div style="font-size: 1.6rem; font-weight: bold; color: #2c3e50;">${curr['freight']} <span style="font-size: 1rem; font-weight: normal;">/ 톤</span></div>
+            </div>
+        </div>
+        <div style="font-size: 0.95rem; color: #34495e;"><b>전략 분석</b>: {curr['summary']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("전체 항로 지도 비교 모드로 초기화", key="reset_selection"):
+        st.session_state.selected_route_id = None
+        st.rerun()
 
-    if st.session_state.selected_route_id is not None:
-        if st.button("모든 항로 전체 보기 (초기화)"):
-            st.session_state.selected_route_id = None
+# ---------------------------------------------------------
+# 완벽한 위치 유지형 독립 Leaflet.js HTML 지도 컴포넌트
+# ---------------------------------------------------------
+routes_json = json.dumps(route_data)
+active_id = "null" if st.session_state.selected_route_id is None else str(st.session_state.selected_route_id)
 
-    processed_routes = []
-    for r in route_data:
-        if st.session_state.selected_route_id is None:
-            color = r["base_color"] + [220]
-            width = 45000
-        else:
-            if r["id"] == st.session_state.selected_route_id:
-                color = r["base_color"] + [255]
-                width = 90000
-            else:
-                color = [180, 180, 180, 40]
-                width = 20000
-        
-        processed_routes.append({
-            "name": r["name"],
-            "path": r["path"],
-            "color": color,
-            "width": width,
-            "info": f"{r['name']} (소요: {r['lead_time']}일, 운임: ${r['freight']}/톤)"
-        })
+map_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        html, body, #map {{
+            width: 100%;
+            height: 440px;
+            margin: 0;
+            padding: 0;
+            border-radius: 10px;
+        }}
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        // 기존 뷰포트 상태 보존 (세션 스토리지 활용)
+        const savedLat = sessionStorage.getItem('map_lat') || 8.0;
+        const savedLng = sessionStorage.getItem('map_lng') || 120.0;
+        const savedZoom = sessionStorage.getItem('map_zoom') || 3;
 
-    path_layer = pdk.Layer(
-        "PathLayer",
-        data=processed_routes,
-        get_path="path",
-        get_color="color",
-        width_scale=1,
-        width_min_pixels=3,
-        get_width="width",
-        pickable=True,
-        auto_highlight=True
-    )
+        const map = L.map('map').setView([savedLat, savedLng], savedZoom);
 
-    scatter_layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=ports_data,
-        get_position="coordinates",
-        get_color="color",
-        get_radius=120000,
-        pickable=True
-    )
+        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+            attribution: '&copy; CartoDB',
+            maxZoom: 18
+        }}).addTo(map);
 
-    view_state = pdk.ViewState(
-        longitude=120.0,
-        latitude=8.0,
-        zoom=2.6,
-        pitch=0
-    )
+        // 사용자가 지도를 움직이거나 확대할 때 실시간 좌표 기억
+        map.on('moveend', function() {{
+            const center = map.getCenter();
+            sessionStorage.setItem('map_lat', center.lat);
+            sessionStorage.setItem('map_lng', center.lng);
+            sessionStorage.setItem('map_zoom', map.getZoom());
+        }});
 
-    st.pydeck_chart(
-        pdk.Deck(
-            layers=[path_layer, scatter_layer],
-            initial_view_state=view_state,
-            tooltip={"text": "{name}\n{info}"},
-            map_provider="carto",
-            map_style="light"
-        ),
-        use_container_width=True
-    )
+        const routes = {routes_json};
+        const activeId = {active_id};
 
-render_interactive_map()
+        // 거점 항구 마커
+        const ports = [
+            {{name: "호주 포트헤들랜드 (스포듀민 선적항)", coords: [-20.3167, 118.576]}},
+            {{name: "중국 닝보항 (제련 거점 기항)", coords: [29.8683, 121.544]}},
+            {{name: "한국 광양항 (수산화리튬 양하항)", coords: [34.9754, 127.697]}},
+            {{name: "싱가포르항 (환적 거점)", coords: [1.3521, 103.8198]}}
+        ];
+
+        ports.forEach(p => {{
+            L.circleMarker(p.coords, {{
+                radius: 6,
+                fillColor: '#34495e',
+                color: '#ffffff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.9
+            }}).bindTooltip(p.name).addTo(map);
+        }});
+
+        // 항로 렌더링 (선택 여부에 따라 굵기와 투명도 동적 적용)
+        routes.forEach(r => {{
+            let isSelected = (activeId !== null && r.id === activeId);
+            let isNone = (activeId === null);
+
+            let weight = isNone ? 4 : (isSelected ? 6 : 2);
+            let opacity = isNone ? 0.85 : (isSelected ? 1.0 : 0.2);
+            let color = (isNone || isSelected) ? r.color : '#bdc3c7';
+
+            let line = L.polyline(r.coords, {{
+                color: color,
+                weight: weight,
+                opacity: opacity
+            }}).addTo(map);
+
+            line.bindTooltip(`<b>${{r.title}}</b><br>${{r.name}}<br>소요: ${{r.lead_time}}일 | 운임: $${{r.freight}}/톤`);
+        }});
+    </script>
+</body>
+</html>
+"""
+
+components.html(map_html, height=460)
 
 # ---------------------------------------------------------
 # 2. 내장 전문 프롬프트 기반 Perplexity 실시간 외생 변수 자동 모니터링
