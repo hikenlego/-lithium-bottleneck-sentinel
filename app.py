@@ -38,7 +38,7 @@ holding_cost_rate = st.sidebar.slider(
 ) / 100.0
 
 # ---------------------------------------------------------
-# 1. 해상 운송 거점별 경로 및 최적 대안 추천 (pydeck WebGL 기반)
+# 1. 해상 운송 거점별 경로 및 최적 대안 추천 (부분 렌더링 최적화)
 # ---------------------------------------------------------
 st.header("1. 해상 운송 거점별 경로 및 최적 대안 추천")
 st.caption("카드의 상단 버튼을 클릭하면 지도가 새로고침되지 않고 해당 항로 선만 즉각 강조됩니다.")
@@ -46,7 +46,7 @@ st.caption("카드의 상단 버튼을 클릭하면 지도가 새로고침되지
 if "selected_route_id" not in st.session_state:
     st.session_state.selected_route_id = None
 
-# 실무 계약 모드 기반 표준 운송 데이터셋 (경도/위도 좌표: [lon, lat])
+# 실무 계약 모드 기반 표준 운송 데이터셋
 route_data = [
     {
         "id": 0,
@@ -55,8 +55,8 @@ route_data = [
         "lead_time": 14,
         "reliability": 94.5,
         "freight": 42.0,
-        "base_color": [46, 204, 113], # 초록색
-        "path": [[118.576, -20.3167], [127.697, 34.9754]] # 포트헤들랜드 -> 광양
+        "base_color": [46, 204, 113],
+        "path": [[118.576, -20.3167], [127.697, 34.9754]]
     },
     {
         "id": 1,
@@ -65,8 +65,8 @@ route_data = [
         "lead_time": 18,
         "reliability": 88.0,
         "freight": 33.5,
-        "base_color": [52, 152, 219], # 파란색
-        "path": [[118.576, -20.3167], [121.544, 29.8683]] # 포트헤들랜드 -> 닝보
+        "base_color": [52, 152, 219],
+        "path": [[118.576, -20.3167], [121.544, 29.8683]]
     },
     {
         "id": 2,
@@ -75,60 +75,11 @@ route_data = [
         "lead_time": 24,
         "reliability": 76.2,
         "freight": 28.0,
-        "base_color": [231, 76, 60], # 빨간색
-        "path": [[118.576, -20.3167], [103.8198, 1.3521], [127.697, 34.9754]] # 호주 -> 싱가포르 -> 광양
+        "base_color": [231, 76, 60],
+        "path": [[118.576, -20.3167], [103.8198, 1.3521], [127.697, 34.9754]]
     }
 ]
 
-# 상단 추천 영역 카드 & 버튼
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("최단 리드타임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 0 else "secondary"):
-        st.session_state.selected_route_id = 0
-    st.metric(route_data[0]["name"], f"{route_data[0]['lead_time']} 일")
-    st.caption(f"운임: ${route_data[0]['freight']}/톤 | 정시성: {route_data[0]['reliability']}%")
-
-with col2:
-    if st.button("최고 정시성 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 1 else "secondary"):
-        st.session_state.selected_route_id = 1
-    st.metric(route_data[1]["name"], f"{route_data[1]['reliability']} %")
-    st.caption(f"리드타임: {route_data[1]['lead_time']}일 | 운임: ${route_data[1]['freight']}/톤")
-
-with col3:
-    if st.button("최저 운임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 2 else "secondary"):
-        st.session_state.selected_route_id = 2
-    st.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤")
-    st.caption(f"리드타임: {route_data[2]['lead_time']}일 | 정시성: {route_data[2]['reliability']}%")
-
-if st.session_state.selected_route_id is not None:
-    if st.button("모든 항로 전체 보기 (초기화)"):
-        st.session_state.selected_route_id = None
-        st.rerun()
-
-# pydeck 렌더링용 데이터셋 구성
-processed_routes = []
-for r in route_data:
-    if st.session_state.selected_route_id is None:
-        color = r["base_color"] + [220]
-        width = 45000
-    else:
-        if r["id"] == st.session_state.selected_route_id:
-            color = r["base_color"] + [255]
-            width = 90000
-        else:
-            color = [180, 180, 180, 50]
-            width = 25000
-    
-    processed_routes.append({
-        "name": r["name"],
-        "path": r["path"],
-        "color": color,
-        "width": width,
-        "info": f"{r['name']} (소요: {r['lead_time']}일, 운임: ${r['freight']}/톤)"
-    })
-
-# 주요 항만 노드 데이터
 ports_data = [
     {"name": "호주 포트헤들랜드 (선적항)", "coordinates": [118.576, -20.3167], "color": [243, 156, 18]},
     {"name": "중국 닝보항 (제련 거점)", "coordinates": [121.544, 29.8683], "color": [52, 152, 219]},
@@ -136,45 +87,94 @@ ports_data = [
     {"name": "싱가포르항 (환적 거점)", "coordinates": [103.8198, 1.3521], "color": [155, 89, 182]}
 ]
 
-# pydeck 레이어 구성
-path_layer = pdk.Layer(
-    "PathLayer",
-    data=processed_routes,
-    get_path="path",
-    get_color="color",
-    width_scale=1,
-    width_min_pixels=3,
-    get_width="width",
-    pickable=True,
-    auto_highlight=True
-)
+# st.fragment를 사용하여 추천 버튼과 지도 영역만 독립 갱신 (전체 페이지 리프레시 방지)
+@st.fragment
+def render_interactive_map():
+    col1, col2, col3 = st.columns(3)
 
-scatter_layer = pdk.Layer(
-    "ScatterplotLayer",
-    data=ports_data,
-    get_position="coordinates",
-    get_color="color",
-    get_radius=120000,
-    pickable=True
-)
+    with col1:
+        if st.button("최단 리드타임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 0 else "secondary"):
+            st.session_state.selected_route_id = 0
+        st.metric(route_data[0]["name"], f"{route_data[0]['lead_time']} 일")
+        st.caption(f"운임: ${route_data[0]['freight']}/톤 | 정시성: {route_data[0]['reliability']}%")
 
-initial_view_state = pdk.ViewState(
-    longitude=120.0,
-    latitude=8.0,
-    zoom=2.6,
-    pitch=0
-)
+    with col2:
+        if st.button("최고 정시성 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 1 else "secondary"):
+            st.session_state.selected_route_id = 1
+        st.metric(route_data[1]["name"], f"{route_data[1]['reliability']} %")
+        st.caption(f"리드타임: {route_data[1]['lead_time']}일 | 운임: ${route_data[1]['freight']}/톤")
 
-# 토큰 불필요 무료 Carto 타일 스타일 적용
-st.pydeck_chart(
-    pdk.Deck(
-        layers=[path_layer, scatter_layer],
-        initial_view_state=initial_view_state,
-        tooltip={"text": "{name}\n{info}"},
-        map_provider="carto",
-        map_style="light"
+    with col3:
+        if st.button("최저 운임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 2 else "secondary"):
+            st.session_state.selected_route_id = 2
+        st.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤")
+        st.caption(f"리드타임: {route_data[2]['lead_time']}일 | 정시성: {route_data[2]['reliability']}%")
+
+    if st.session_state.selected_route_id is not None:
+        if st.button("모든 항로 전체 보기 (초기화)"):
+            st.session_state.selected_route_id = None
+
+    processed_routes = []
+    for r in route_data:
+        if st.session_state.selected_route_id is None:
+            color = r["base_color"] + [220]
+            width = 45000
+        else:
+            if r["id"] == st.session_state.selected_route_id:
+                color = r["base_color"] + [255]
+                width = 90000
+            else:
+                color = [180, 180, 180, 40]
+                width = 20000
+        
+        processed_routes.append({
+            "name": r["name"],
+            "path": r["path"],
+            "color": color,
+            "width": width,
+            "info": f"{r['name']} (소요: {r['lead_time']}일, 운임: ${r['freight']}/톤)"
+        })
+
+    path_layer = pdk.Layer(
+        "PathLayer",
+        data=processed_routes,
+        get_path="path",
+        get_color="color",
+        width_scale=1,
+        width_min_pixels=3,
+        get_width="width",
+        pickable=True,
+        auto_highlight=True
     )
-)
+
+    scatter_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=ports_data,
+        get_position="coordinates",
+        get_color="color",
+        get_radius=120000,
+        pickable=True
+    )
+
+    view_state = pdk.ViewState(
+        longitude=120.0,
+        latitude=8.0,
+        zoom=2.6,
+        pitch=0
+    )
+
+    st.pydeck_chart(
+        pdk.Deck(
+            layers=[path_layer, scatter_layer],
+            initial_view_state=view_state,
+            tooltip={"text": "{name}\n{info}"},
+            map_provider="carto",
+            map_style="light"
+        ),
+        use_container_width=True
+    )
+
+render_interactive_map()
 
 # ---------------------------------------------------------
 # 2. 내장 전문 프롬프트 기반 Perplexity 실시간 외생 변수 자동 모니터링
