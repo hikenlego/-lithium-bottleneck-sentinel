@@ -7,7 +7,7 @@ import requests
 import json
 
 # ---------------------------------------------------------
-# 0. 페이지 설정 및 사이드바 파라미터 (원가 및 시뮬레이션 변수)
+# 0. 기본 설정 및 사이드바 시뮬레이션 파라미터
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="리튬 공급망 조달 병목 대응 의사결정 시스템",
@@ -17,7 +17,7 @@ st.set_page_config(
 st.title("배터리 리튬 공급망 실시간 외생 병목 모니터링 & SCM 최적화 대시보드")
 st.markdown("호주 포트헤들랜드 선석 과포화 및 기상 변동 - 중국 제련 고집중 - 한국 양극재 클러스터 연계")
 
-# 사이드바: 기업 내부 대외비 원가 및 공장 운영 변수 입력 UI
+# 사이드바: 기업 맞춤형 원가 및 공장 운영 변수 입력 UI
 st.sidebar.header("공장 운영 및 원가 시뮬레이션 변수")
 st.sidebar.markdown("기업별 맞춤형 파라미터를 조정하여 정밀 ROI를 도출합니다.")
 
@@ -39,94 +39,104 @@ holding_cost_rate = st.sidebar.slider(
 ) / 100.0
 
 # ---------------------------------------------------------
-# 1. 해상 운송 경로 분석 및 3대 최적 추천 (표준 벤치마크 DB 기반)
+# 1. 해상 운송 거점별 경로 및 최적 대안 추천 (인터랙티브 강조 기능)
 # ---------------------------------------------------------
 st.header("1. 해상 운송 거점별 경로 및 최적 대안 추천")
 st.caption("한국해양진흥공사(KOBC) 건화물선 리포트 및 주요 선사 표준 공시 스케줄 기반 데이터셋")
 
-# 표준 벤치마크 데이터
+# 세션 상태 초기화 (기본 선택: 0번 직항 COA 전용선)
+if "selected_route_id" not in st.session_state:
+    st.session_state.selected_route_id = 0
+
+# 실무 계약 모드 기반 표준 운송 데이터셋
 route_data = [
     {
-        "carrier": "한-호 직항 장기운송계약(COA) 전용선",
+        "id": 0,
+        "name": "한-호 직항 장기운송계약(COA) 전용선",
         "vessel_type": "Supramax 55,000 DWT",
-        "origin": "Port Hedland",
-        "destination": "Gwangyang",
         "route_desc": "호주 포트헤들랜드 -> 한국 광양 (지정 선석 직송)",
         "lead_time": 14,
         "reliability": 94.5,
         "freight": 42.0,
+        "color": "#2ecc71",
         "coords": [[-20.3167, 118.576], [34.9754, 127.697]]
     },
     {
-        "carrier": "중국 제련 톨링 경유 정기선",
+        "id": 1,
+        "name": "중국 제련 톨링 경유 정기선",
         "vessel_type": "Ultramax 62,000 DWT",
-        "origin": "Port Hedland",
-        "destination": "Ningbo",
         "route_desc": "호주 포트헤들랜드 -> 중국 닝보 (제련 라인 기항)",
         "lead_time": 18,
         "reliability": 88.0,
         "freight": 33.5,
+        "color": "#3498db",
         "coords": [[-20.3167, 118.576], [29.8683, 121.544]]
     },
     {
-        "carrier": "스팟 시장 자유 용선 (동남아 환적)",
+        "id": 2,
+        "name": "스팟 시장 자유 용선 (동남아 환적)",
         "vessel_type": "Handymax 45,000 DWT",
-        "origin": "Port Hedland",
-        "destination": "Gwangyang",
         "route_desc": "호주 -> 싱가포르 환적 -> 한국 광양 (스팟 부킹)",
         "lead_time": 24,
         "reliability": 76.2,
         "freight": 28.0,
+        "color": "#e74c3c",
         "coords": [[-20.3167, 118.576], [1.3521, 103.8198], [34.9754, 127.697]]
     }
 ]
 
-
-df_routes = pd.DataFrame(route_data)
-
-# 3대 최적 옵션 계산
-best_lead_time = df_routes.loc[df_routes["lead_time"].idxmin()]
-best_reliability = df_routes.loc[df_routes["reliability"].idxmax()]
-best_freight = df_routes.loc[df_routes["freight"].idxmin()]
-
+# 3대 지표 추천 카드 및 인터랙티브 선택 버튼
 col1, col2, col3 = st.columns(3)
+
 with col1:
     st.success("최단 리드타임 추천")
-    st.metric(best_lead_time["carrier"], f"{best_lead_time['lead_time']} 일")
-    st.caption(f"운임: ${best_lead_time['freight']}/톤 | 정시성: {best_lead_time['reliability']}%")
+    st.metric(route_data[0]["name"], f"{route_data[0]['lead_time']} 일")
+    st.caption(f"운임: ${route_data[0]['freight']}/톤 | 정시성: {route_data[0]['reliability']}%")
+    if st.button("이 항로 지도에서 확인", key="btn_0", use_container_width=True):
+        st.session_state.selected_route_id = 0
+
 with col2:
     st.info("최고 정시성 추천")
-    st.metric(best_reliability["carrier"], f"{best_reliability['reliability']} %")
-    st.caption(f"리드타임: {best_reliability['lead_time']}일 | 운임: ${best_reliability['freight']}/톤")
+    st.metric(route_data[1]["name"], f"{route_data[1]['reliability']} %")
+    st.caption(f"리드타임: {route_data[1]['lead_time']}일 | 운임: ${route_data[1]['freight']}/톤")
+    if st.button("이 항로 지도에서 확인", key="btn_1", use_container_width=True):
+        st.session_state.selected_route_id = 1
+
 with col3:
     st.warning("최저 운임 추천")
-    st.metric(best_freight["carrier"], f"${best_freight['freight']} / 톤")
-    st.caption(f"리드타임: {best_freight['lead_time']}일 | 정시성: {best_freight['reliability']}%")
+    st.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤")
+    st.caption(f"리드타임: {route_data[2]['lead_time']}일 | 정시성: {route_data[2]['reliability']}%")
+    if st.button("이 항로 지도에서 확인", key="btn_2", use_container_width=True):
+        st.session_state.selected_route_id = 2
 
-# 지도 시각화
+# 지도 렌더링 (선택된 항로는 진하게, 비선택 항로는 연하게 표시)
 m = folium.Map(location=[5.0, 120.0], zoom_start=3)
-colors = ["#2ecc71", "#3498db", "#e74c3c"]
 
-for idx, r in df_routes.iterrows():
+for r in route_data:
+    is_selected = (r["id"] == st.session_state.selected_route_id)
+    line_weight = 6 if is_selected else 2
+    line_opacity = 1.0 if is_selected else 0.25
+    line_color = r["color"] if is_selected else "#95a5a6"
+
     folium.PolyLine(
         locations=r["coords"],
-        color=colors[idx % len(colors)],
-        weight=4,
-        opacity=0.8,
-        tooltip=f"{r['carrier']} ({r['route_desc']}) | {r['lead_time']}일 | ${r['freight']}/톤"
+        color=line_color,
+        weight=line_weight,
+        opacity=line_opacity,
+        tooltip=f"[{'선택됨' if is_selected else '일반'}] {r['name']} | {r['lead_time']}일 | ${r['freight']}/톤"
     ).add_to(m)
 
-st_folium(m, width=1200, height=430)
+st_folium(m, width=1200, height=430, key=f"map_{st.session_state.selected_route_id}")
 
 # ---------------------------------------------------------
-# 2. 내장 프롬프트 기반 Perplexity 실시간 외생 변수 자동 모니터링
+# 2. 내장 전문 프롬프트 기반 Perplexity 실시간 외생 변수 자동 모니터링
 # ---------------------------------------------------------
 st.header("2. AI 외생 변수 실시간 모니터링 & 자동 판별")
 st.caption("내장된 전문 프롬프트가 Perplexity 웹 검색 API를 통해 글로벌 규제 및 기상 변수를 자동 수집합니다.")
 
 api_key = st.text_input("Perplexity API Key 입력", type="password", placeholder="pplx-...")
 
-# 사전 정의된 고정 시스템 프롬프트 (사용자가 작성할 필요 없음)
+# 내장 시스템 프롬프트 (사용자가 직접 입력할 필요 없음)
 SYSTEM_PROMPT = """You are an elite raw material supply chain risk monitoring engine.
 Your task is to analyze real-time external conditions and determine if an operational disruption risk is active.
 Answer strictly based on verified recent web facts. 
@@ -149,7 +159,6 @@ def fetch_perplexity_status(scenario_type, key):
         "Content-Type": "application/json"
     }
     
-    # 시나리오별 자동 내장 질의문
     if "시나리오 1" in scenario_type:
         user_query = "Check the current weather conditions, cyclone warnings, and port operations at Port Hedland and Pilbara Western Australia. Are there active cyclone disruptions, heavy rainfall, or terminal berth closures affecting bulk mining shipments?"
     else:
@@ -234,7 +243,6 @@ else:
     tuning_cost_per_ton = 650.0  # 사전 튜닝 및 슬롯 예약 수수료 ($/톤)
     total_standby_cost = standby_ton * tuning_cost_per_ton
     
-    # 회피액: 120일간 원료 부족으로 인한 생산 손실 및 IRA 세액공제($3,500/톤 상당) 배제 손실 방어
     prevented_disruption_value = (daily_demand * transition_days) * 3500.0
     net_benefit = prevented_disruption_value - total_standby_cost
     roi = (net_benefit / total_standby_cost) * 100.0 if total_standby_cost > 0 else 0
