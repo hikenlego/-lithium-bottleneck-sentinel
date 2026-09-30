@@ -47,36 +47,40 @@ st.caption("한국해양진흥공사(KOBC) 건화물선 리포트 및 주요 선
 # 표준 벤치마크 데이터
 route_data = [
     {
-        "carrier": "A선사 (한-호 직항 벌크선)",
+        "carrier": "한-호 직항 장기운송계약(COA) 전용선",
+        "vessel_type": "Supramax 55,000 DWT",
         "origin": "Port Hedland",
         "destination": "Gwangyang",
-        "route_desc": "호주 포트헤들랜드 -> 한국 광양 직항",
+        "route_desc": "호주 포트헤들랜드 -> 한국 광양 (지정 선석 직송)",
         "lead_time": 14,
         "reliability": 94.5,
         "freight": 42.0,
         "coords": [[-20.3167, 118.576], [34.9754, 127.697]]
     },
     {
-        "carrier": "B선사 (호-중 톨링 정기선)",
+        "carrier": "중국 제련 톨링 경유 정기선",
+        "vessel_type": "Ultramax 62,000 DWT",
         "origin": "Port Hedland",
         "destination": "Ningbo",
-        "route_desc": "호주 포트헤들랜드 -> 중국 닝보 기항",
+        "route_desc": "호주 포트헤들랜드 -> 중국 닝보 (제련 라인 기항)",
         "lead_time": 18,
         "reliability": 88.0,
         "freight": 33.5,
         "coords": [[-20.3167, 118.576], [29.8683, 121.544]]
     },
     {
-        "carrier": "C선사 (글로벌 스팟 벌크 환적)",
+        "carrier": "스팟 시장 자유 용선 (동남아 환적)",
+        "vessel_type": "Handymax 45,000 DWT",
         "origin": "Port Hedland",
         "destination": "Gwangyang",
-        "route_desc": "호주 -> 싱가포르 환적 -> 한국 광양",
+        "route_desc": "호주 -> 싱가포르 환적 -> 한국 광양 (스팟 부킹)",
         "lead_time": 24,
         "reliability": 76.2,
         "freight": 28.0,
         "coords": [[-20.3167, 118.576], [1.3521, 103.8198], [34.9754, 127.697]]
     }
 ]
+
 
 df_routes = pd.DataFrame(route_data)
 
