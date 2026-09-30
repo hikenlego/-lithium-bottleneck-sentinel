@@ -39,14 +39,14 @@ holding_cost_rate = st.sidebar.slider(
 ) / 100.0
 
 # ---------------------------------------------------------
-# 1. 해상 운송 거점별 경로 및 최적 대안 추천 (인터랙티브 강조 기능)
+# 1. 해상 운송 거점별 경로 및 최적 대안 추천
 # ---------------------------------------------------------
 st.header("1. 해상 운송 거점별 경로 및 최적 대안 추천")
-st.caption("한국해양진흥공사(KOBC) 건화물선 리포트 및 주요 선사 표준 공시 스케줄 기반 데이터셋")
+st.caption("추천 상단 버튼을 클릭하면 해당 항로가 지도 위에 강조 표시되며, 초기 상태에서는 모든 항로가 균일하게 표시됩니다.")
 
-# 세션 상태 초기화 (기본 선택: 0번 직항 COA 전용선)
+# 세션 상태 초기화 (초기값 None: 아무것도 선택되지 않은 전체 균일 상태)
 if "selected_route_id" not in st.session_state:
-    st.session_state.selected_route_id = 0
+    st.session_state.selected_route_id = None
 
 # 실무 계약 모드 기반 표준 운송 데이터셋
 route_data = [
@@ -58,7 +58,7 @@ route_data = [
         "lead_time": 14,
         "reliability": 94.5,
         "freight": 42.0,
-        "color": "#2ecc71",
+        "color": "#2ecc71", # 초록색
         "coords": [[-20.3167, 118.576], [34.9754, 127.697]]
     },
     {
@@ -69,7 +69,7 @@ route_data = [
         "lead_time": 18,
         "reliability": 88.0,
         "freight": 33.5,
-        "color": "#3498db",
+        "color": "#3498db", # 파란색
         "coords": [[-20.3167, 118.576], [29.8683, 121.544]]
     },
     {
@@ -80,53 +80,66 @@ route_data = [
         "lead_time": 24,
         "reliability": 76.2,
         "freight": 28.0,
-        "color": "#e74c3c",
+        "color": "#e74c3c", # 빨간색
         "coords": [[-20.3167, 118.576], [1.3521, 103.8198], [34.9754, 127.697]]
     }
 ]
 
-# 3대 지표 추천 카드 및 인터랙티브 선택 버튼
+# 상단 추천 영역 (버튼 자체로 바로 항로 선택 트리거)
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.success("최단 리드타임 추천")
+    if st.button("최단 리드타임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 0 else "secondary"):
+        st.session_state.selected_route_id = 0
     st.metric(route_data[0]["name"], f"{route_data[0]['lead_time']} 일")
     st.caption(f"운임: ${route_data[0]['freight']}/톤 | 정시성: {route_data[0]['reliability']}%")
-    if st.button("이 항로 지도에서 확인", key="btn_0", use_container_width=True):
-        st.session_state.selected_route_id = 0
 
 with col2:
-    st.info("최고 정시성 추천")
+    if st.button("최고 정시성 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 1 else "secondary"):
+        st.session_state.selected_route_id = 1
     st.metric(route_data[1]["name"], f"{route_data[1]['reliability']} %")
     st.caption(f"리드타임: {route_data[1]['lead_time']}일 | 운임: ${route_data[1]['freight']}/톤")
-    if st.button("이 항로 지도에서 확인", key="btn_1", use_container_width=True):
-        st.session_state.selected_route_id = 1
 
 with col3:
-    st.warning("최저 운임 추천")
+    if st.button("최저 운임 추천", use_container_width=True, type="primary" if st.session_state.selected_route_id == 2 else "secondary"):
+        st.session_state.selected_route_id = 2
     st.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤")
     st.caption(f"리드타임: {route_data[2]['lead_time']}일 | 정시성: {route_data[2]['reliability']}%")
-    if st.button("이 항로 지도에서 확인", key="btn_2", use_container_width=True):
-        st.session_state.selected_route_id = 2
 
-# 지도 렌더링 (선택된 항로는 진하게, 비선택 항로는 연하게 표시)
+# 전체 초기화 보조 링크
+if st.session_state.selected_route_id is not None:
+    if st.button("모든 항로 전체 보기 (초기화)"):
+        st.session_state.selected_route_id = None
+        st.rerun()
+
+# 지도 시각화 (선택 여부에 따른 조건부 스타일링)
 m = folium.Map(location=[5.0, 120.0], zoom_start=3)
 
 for r in route_data:
-    is_selected = (r["id"] == st.session_state.selected_route_id)
-    line_weight = 6 if is_selected else 2
-    line_opacity = 1.0 if is_selected else 0.25
-    line_color = r["color"] if is_selected else "#95a5a6"
+    # 아무것도 선택되지 않았을 때(None): 모두 기준 두께와 고유 색상으로 균일 표시
+    if st.session_state.selected_route_id is None:
+        line_weight = 4
+        line_opacity = 0.85
+        line_color = r["color"]
+        tooltip_prefix = "[표준]"
+    else:
+        # 특정 항로가 선택되었을 때
+        is_selected = (r["id"] == st.session_state.selected_route_id)
+        line_weight = 6 if is_selected else 2
+        line_opacity = 1.0 if is_selected else 0.2
+        line_color = r["color"] if is_selected else "#bdc3c7"
+        tooltip_prefix = "[선택됨]" if is_selected else "[일반]"
 
     folium.PolyLine(
         locations=r["coords"],
         color=line_color,
         weight=line_weight,
         opacity=line_opacity,
-        tooltip=f"[{'선택됨' if is_selected else '일반'}] {r['name']} | {r['lead_time']}일 | ${r['freight']}/톤"
+        tooltip=f"{tooltip_prefix} {r['name']} | {r['lead_time']}일 | ${r['freight']}/톤"
     ).add_to(m)
 
-st_folium(m, width=1200, height=430, key=f"map_{st.session_state.selected_route_id}")
+# 고정 key를 주어 줌 레벨과 드래그 위치가 리셋되지 않고 유지되도록 최적화
+st_folium(m, width=1200, height=430, key="main_folium_map", returned_objects=[])
 
 # ---------------------------------------------------------
 # 2. 내장 전문 프롬프트 기반 Perplexity 실시간 외생 변수 자동 모니터링
@@ -136,7 +149,6 @@ st.caption("내장된 전문 프롬프트가 Perplexity 웹 검색 API를 통해
 
 api_key = st.text_input("Perplexity API Key 입력", type="password", placeholder="pplx-...")
 
-# 내장 시스템 프롬프트 (사용자가 직접 입력할 필요 없음)
 SYSTEM_PROMPT = """You are an elite raw material supply chain risk monitoring engine.
 Your task is to analyze real-time external conditions and determine if an operational disruption risk is active.
 Answer strictly based on verified recent web facts. 
@@ -214,9 +226,7 @@ if "시나리오 1" in target_scenario:
 
     additional_days = 21
     req_stock_ton = daily_demand * additional_days
-    # 21일간의 재고 유지 비용 = (추가 비축액) * 연간보관율 * (21일 / 365일)
     inv_cost = (req_stock_ton * lithium_price) * (holding_cost_rate * (additional_days / 365.0))
-    # 공장 셧다운 방어 일수 (평균 체선 및 조달 지연 7일 방어 가정)
     prevented_days = 7
     prevented_loss = prevented_days * daily_stop_loss
     net_benefit = prevented_loss - inv_cost
@@ -238,9 +248,9 @@ else:
     """)
 
     transition_days = 120
-    split_ratio = 0.40  # 40% 사전 계약
+    split_ratio = 0.40
     standby_ton = daily_demand * transition_days * split_ratio
-    tuning_cost_per_ton = 650.0  # 사전 튜닝 및 슬롯 예약 수수료 ($/톤)
+    tuning_cost_per_ton = 650.0
     total_standby_cost = standby_ton * tuning_cost_per_ton
     
     prevented_disruption_value = (daily_demand * transition_days) * 3500.0
