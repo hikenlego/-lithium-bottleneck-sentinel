@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import folium
-from streamlit_folium import st_folium
+import pydeck as pdk
 import requests
 import json
 
@@ -39,53 +38,49 @@ holding_cost_rate = st.sidebar.slider(
 ) / 100.0
 
 # ---------------------------------------------------------
-# 1. 해상 운송 거점별 경로 및 최적 대안 추천
+# 1. 해상 운송 거점별 경로 및 최적 대안 추천 (pydeck WebGL 기반)
 # ---------------------------------------------------------
 st.header("1. 해상 운송 거점별 경로 및 최적 대안 추천")
-st.caption("추천 상단 버튼을 클릭하면 해당 항로가 지도 위에 강조 표시되며, 초기 상태에서는 모든 항로가 균일하게 표시됩니다.")
+st.caption("카드의 상단 버튼을 클릭하면 지도가 새로고침되지 않고 해당 항로 선만 즉각 강조됩니다.")
 
-# 세션 상태 초기화 (초기값 None: 아무것도 선택되지 않은 전체 균일 상태)
 if "selected_route_id" not in st.session_state:
     st.session_state.selected_route_id = None
 
-# 실무 계약 모드 기반 표준 운송 데이터셋
+# 실무 계약 모드 기반 표준 운송 데이터셋 (경도/위도 좌표: [lon, lat])
 route_data = [
     {
         "id": 0,
         "name": "한-호 직항 장기운송계약(COA) 전용선",
         "vessel_type": "Supramax 55,000 DWT",
-        "route_desc": "호주 포트헤들랜드 -> 한국 광양 (지정 선석 직송)",
         "lead_time": 14,
         "reliability": 94.5,
         "freight": 42.0,
-        "color": "#2ecc71", # 초록색
-        "coords": [[-20.3167, 118.576], [34.9754, 127.697]]
+        "base_color": [46, 204, 113], # 초록색
+        "path": [[118.576, -20.3167], [127.697, 34.9754]] # 포트헤들랜드 -> 광양
     },
     {
         "id": 1,
         "name": "중국 제련 톨링 경유 정기선",
         "vessel_type": "Ultramax 62,000 DWT",
-        "route_desc": "호주 포트헤들랜드 -> 중국 닝보 (제련 라인 기항)",
         "lead_time": 18,
         "reliability": 88.0,
         "freight": 33.5,
-        "color": "#3498db", # 파란색
-        "coords": [[-20.3167, 118.576], [29.8683, 121.544]]
+        "base_color": [52, 152, 219], # 파란색
+        "path": [[118.576, -20.3167], [121.544, 29.8683]] # 포트헤들랜드 -> 닝보
     },
     {
         "id": 2,
         "name": "스팟 시장 자유 용선 (동남아 환적)",
         "vessel_type": "Handymax 45,000 DWT",
-        "route_desc": "호주 -> 싱가포르 환적 -> 한국 광양 (스팟 부킹)",
         "lead_time": 24,
         "reliability": 76.2,
         "freight": 28.0,
-        "color": "#e74c3c", # 빨간색
-        "coords": [[-20.3167, 118.576], [1.3521, 103.8198], [34.9754, 127.697]]
+        "base_color": [231, 76, 60], # 빨간색
+        "path": [[118.576, -20.3167], [103.8198, 1.3521], [127.697, 34.9754]] # 호주 -> 싱가포르 -> 광양
     }
 ]
 
-# 상단 추천 영역 (버튼 자체로 바로 항로 선택 트리거)
+# 상단 추천 영역 카드 & 버튼
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -106,40 +101,80 @@ with col3:
     st.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤")
     st.caption(f"리드타임: {route_data[2]['lead_time']}일 | 정시성: {route_data[2]['reliability']}%")
 
-# 전체 초기화 보조 링크
 if st.session_state.selected_route_id is not None:
     if st.button("모든 항로 전체 보기 (초기화)"):
         st.session_state.selected_route_id = None
         st.rerun()
 
-# 지도 시각화 (선택 여부에 따른 조건부 스타일링)
-m = folium.Map(location=[5.0, 120.0], zoom_start=3)
-
+# pydeck 렌더링용 데이터셋 구성 (선택 여부에 따른 가변 색상/굵기)
+processed_routes = []
 for r in route_data:
-    # 아무것도 선택되지 않았을 때(None): 모두 기준 두께와 고유 색상으로 균일 표시
     if st.session_state.selected_route_id is None:
-        line_weight = 4
-        line_opacity = 0.85
-        line_color = r["color"]
-        tooltip_prefix = "[표준]"
+        color = r["base_color"] + [220] # 알파값(불투명도) 220
+        width = 45000 # 미터 단위 선 두께
     else:
-        # 특정 항로가 선택되었을 때
-        is_selected = (r["id"] == st.session_state.selected_route_id)
-        line_weight = 6 if is_selected else 2
-        line_opacity = 1.0 if is_selected else 0.2
-        line_color = r["color"] if is_selected else "#bdc3c7"
-        tooltip_prefix = "[선택됨]" if is_selected else "[일반]"
+        if r["id"] == st.session_state.selected_route_id:
+            color = r["base_color"] + [255]
+            width = 90000 # 선택된 항로 강조
+        else:
+            color = [180, 180, 180, 50] # 비선택 항로는 흐린 회색 투명 처리
+            width = 25000
+    
+    processed_routes.append({
+        "name": r["name"],
+        "path": r["path"],
+        "color": color,
+        "width": width,
+        "info": f"{r['name']} (소요: {r['lead_time']}일, 운임: ${r['freight']}/톤)"
+    })
 
-    folium.PolyLine(
-        locations=r["coords"],
-        color=line_color,
-        weight=line_weight,
-        opacity=line_opacity,
-        tooltip=f"{tooltip_prefix} {r['name']} | {r['lead_time']}일 | ${r['freight']}/톤"
-    ).add_to(m)
+# 주요 항만 노드 데이터
+ports_data = [
+    {"name": "호주 포트헤들랜드 (선적항)", "coordinates": [118.576, -20.3167], "color": [243, 156, 18]},
+    {"name": "중국 닝보항 (제련 거점)", "coordinates": [121.544, 29.8683], "color": [52, 152, 219]},
+    {"name": "한국 광양항 (양하항)", "coordinates": [127.697, 34.9754], "color": [46, 204, 113]},
+    {"name": "싱가포르항 (환적 거점)", "coordinates": [103.8198, 1.3521], "color": [155, 89, 182]}
+]
 
-# 고정 key를 주어 줌 레벨과 드래그 위치가 리셋되지 않고 유지되도록 최적화
-st_folium(m, width=1200, height=430, key="main_folium_map", returned_objects=[])
+# pydeck 레이어 구성
+path_layer = pdk.Layer(
+    "PathLayer",
+    data=processed_routes,
+    get_path="path",
+    get_color="color",
+    width_scale=1,
+    width_min_pixels=3,
+    get_width="width",
+    pickable=True,
+    auto_highlight=True
+)
+
+scatter_layer = pdk.Layer(
+    "ScatterplotLayer",
+    data=ports_data,
+    get_position="coordinates",
+    get_color="color",
+    get_radius=120000,
+    pickable=True
+)
+
+# 기본 뷰포트 (한국과 호주가 한 화면에 안정적으로 들어오는 초기 중심점)
+initial_view_state = pdk.ViewState(
+    longitude=120.0,
+    latitude=8.0,
+    zoom=2.6,
+    pitch=0
+)
+
+# 맵 렌더링 (st.pydeck_chart는 GPU 기반 벡터 렌더러로 새로고침 깜빡임 없음)
+st.pydeck_chart(
+    pdk.Deck(
+        layers=[path_layer, scatter_layer],
+        initial_view_state=initial_view_state,
+        tooltip={"text": "{name}\n{info}"},
+        map_style="mapbox://styles/mapbox/light-v9"
+    )
+)
 
 # ---------------------------------------------------------
 # 2. 내장 전문 프롬프트 기반 Perplexity 실시간 외생 변수 자동 모니터링
