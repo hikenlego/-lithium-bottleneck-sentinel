@@ -13,24 +13,25 @@ st.set_page_config(
     layout="wide"
 )
 
-# 세련된 UI 스타일링 (대형 카드 버튼 및 슬라이드 컨테이너)
+# 토글 슬라이드 세그먼트 및 카드 애니메이션 커스텀 CSS
 st.markdown("""
 <style>
     div[data-testid="stMetricValue"] {
         font-size: 1.8rem;
     }
+    /* 슬라이드 다운 애니메이션 카드 */
     .route-card {
-        padding: 20px;
-        border-radius: 12px;
-        background: #f8f9fa;
-        border-left: 6px solid #3498db;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        padding: 24px;
+        border-radius: 14px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
         margin-top: 15px;
-        margin-bottom: 20px;
-        animation: slideDown 0.3s ease-out;
+        margin-bottom: 25px;
+        animation: slideDownFade 0.35s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    @keyframes slideDown {
-        from { opacity: 0; transform: translateY(-10px); }
+    @keyframes slideDownFade {
+        from { opacity: 0; transform: translateY(-12px); }
         to { opacity: 1; transform: translateY(0); }
     }
 </style>
@@ -61,14 +62,10 @@ holding_cost_rate = st.sidebar.slider(
 ) / 100.0
 
 # ---------------------------------------------------------
-# 1. 해상 운송 거점별 경로 및 대형 추천 버튼 (인터랙티브 슬라이드)
+# 1. 해상 운송 거점별 경로 및 토글 슬라이드 UI
 # ---------------------------------------------------------
 st.header("1. 해상 운송 거점별 경로 및 최적 대안 추천")
 
-if "selected_route_id" not in st.session_state:
-    st.session_state.selected_route_id = None
-
-# 실무 계약 모드 기반 표준 운송 데이터셋
 route_data = [
     {
         "id": 0,
@@ -111,61 +108,71 @@ route_data = [
     }
 ]
 
-# 큼직한 상단 추천 버튼 3개 배치
-col1, col2, col3 = st.columns(3)
+# 가로형 토글 슬라이드 세그먼트 컨트롤 UI
+toggle_options = ["🌐 전체 항로 종합 비교", "🚀 최단 리드타임 추천", "⏱️ 최고 정시성 추천", "💰 최저 운임 추천"]
 
-with col1:
-    btn_0_type = "primary" if st.session_state.selected_route_id == 0 else "secondary"
-    if st.button("🚀 최단 리드타임 추천\n\n(14일 직항 COA)", use_container_width=True, type=btn_0_type):
-        st.session_state.selected_route_id = 0
+selected_toggle = st.segmented_control(
+    "운송 최적화 시나리오 선택",
+    toggle_options,
+    default="🌐 전체 항로 종합 비교",
+    label_visibility="collapsed"
+)
 
-with col2:
-    btn_1_type = "primary" if st.session_state.selected_route_id == 1 else "secondary"
-    if st.button("⏱️ 최고 정시성 추천\n\n(94.5% 톨링 정기선)", use_container_width=True, type=btn_1_type):
-        st.session_state.selected_route_id = 1
+# 토글 선택값에 따른 active_id 매핑
+if selected_toggle == "🚀 최단 리드타임 추천":
+    active_id = 0
+elif selected_toggle == "⏱️ 최고 정시성 추천":
+    active_id = 1
+elif selected_toggle == "💰 최저 운임 추천":
+    active_id = 2
+else:
+    active_id = None
 
-with col3:
-    btn_2_type = "primary" if st.session_state.selected_route_id == 2 else "secondary"
-    if st.button("💰 최저 운임 추천\n\n($28.0/톤 스팟 환적)", use_container_width=True, type=btn_2_type):
-        st.session_state.selected_route_id = 2
-
-# 버튼 클릭 시 아래로 슬라이드 다운되는 상세 제원 패널
-if st.session_state.selected_route_id is not None:
-    curr = route_data[st.session_state.selected_route_id]
+# 슬라이드 다운 세부 정보 패널 (전체 보기일 때와 단일 선택일 때의 반응)
+if active_id is not None:
+    curr = route_data[active_id]
     st.markdown(f"""
-    <div class="route-card" style="border-left-color: {curr['color']};">
+    <div class="route-card" style="border-left: 6px solid {curr['color']};">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3 style="margin:0; color: #2c3e50;">📌 {curr['title']} : {curr['name']}</h3>
-            <span style="background-color: {curr['color']}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.9rem; font-weight: bold;">선택된 최적 대안</span>
+            <h3 style="margin:0; color: #1e293b; font-size: 1.35rem;">📌 {curr['title']} : {curr['name']}</h3>
+            <span style="background-color: {curr['color']}; color: white; padding: 5px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">선택된 최적 대안</span>
         </div>
-        <p style="margin: 8px 0 16px 0; color: #7f8c8d; font-size: 1.05rem;">{curr['route_desc']} (투입 선형: <b>{curr['vessel_type']}</b>)</p>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 12px;">
-            <div style="background: white; padding: 12px; border-radius: 8px; border: 1px solid #e1e8ed;">
-                <div style="font-size: 0.85rem; color: #7f8c8d;">조달 소요 일수 (리드타임)</div>
-                <div style="font-size: 1.6rem; font-weight: bold; color: #2c3e50;">{curr['lead_time']} 일</div>
+        <p style="margin: 10px 0 16px 0; color: #64748b; font-size: 1.05rem;">{curr['route_desc']} (투입 선형: <b>{curr['vessel_type']}</b>)</p>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 14px;">
+            <div style="background: #f8fafc; padding: 14px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                <div style="font-size: 0.85rem; color: #64748b;">조달 소요 일수 (리드타임)</div>
+                <div style="font-size: 1.7rem; font-weight: bold; color: #0f172a;">{curr['lead_time']} 일</div>
             </div>
-            <div style="background: white; padding: 12px; border-radius: 8px; border: 1px solid #e1e8ed;">
-                <div style="font-size: 0.85rem; color: #7f8c8d;">운항 정시성 지수</div>
-                <div style="font-size: 1.6rem; font-weight: bold; color: #2c3e50;">{curr['reliability']} %</div>
+            <div style="background: #f8fafc; padding: 14px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                <div style="font-size: 0.85rem; color: #64748b;">운항 정시성 지수</div>
+                <div style="font-size: 1.7rem; font-weight: bold; color: #0f172a;">{curr['reliability']} %</div>
             </div>
-            <div style="background: white; padding: 12px; border-radius: 8px; border: 1px solid #e1e8ed;">
-                <div style="font-size: 0.85rem; color: #7f8c8d;">해상 운임 지표</div>
-                <div style="font-size: 1.6rem; font-weight: bold; color: #2c3e50;">${curr['freight']} <span style="font-size: 1rem; font-weight: normal;">/ 톤</span></div>
+            <div style="background: #f8fafc; padding: 14px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                <div style="font-size: 0.85rem; color: #64748b;">해상 운임 지표</div>
+                <div style="font-size: 1.7rem; font-weight: bold; color: #0f172a;">${curr['freight']} <span style="font-size: 0.95rem; font-weight: normal; color: #64748b;">/ 톤</span></div>
             </div>
         </div>
-        <div style="font-size: 0.95rem; color: #34495e;"><b>전략 분석</b>: {curr['summary']}</div>
+        <div style="font-size: 0.95rem; color: #334155; line-height: 1.5;"><b>전략 분석</b>: {curr['summary']}</div>
     </div>
     """, unsafe_allow_html=True)
-    
-    if st.button("전체 항로 지도 비교 모드로 초기화", key="reset_selection"):
-        st.session_state.selected_route_id = None
-        st.rerun()
+else:
+    # 전체 보기 모드일 때 간략 요약 그리드 노출
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.caption("최단 리드타임 대안")
+        st.metric(route_data[0]["name"], f"{route_data[0]['lead_time']} 일", f"${route_data[0]['freight']}/톤")
+    with col_b:
+        st.caption("최고 정시성 대안")
+        st.metric(route_data[1]["name"], f"{route_data[1]['reliability']} %", f"{route_data[1]['lead_time']}일 소요")
+    with col_c:
+        st.caption("최저 운임 대안")
+        st.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤", f"정시성 {route_data[2]['reliability']}%")
 
 # ---------------------------------------------------------
-# 완벽한 위치 유지형 독립 Leaflet.js HTML 지도 컴포넌트
+# 오픈스트리트맵(OSM) 기반 상태 유지 Leaflet 지도 (키 불필요)
 # ---------------------------------------------------------
 routes_json = json.dumps(route_data)
-active_id = "null" if st.session_state.selected_route_id is None else str(st.session_state.selected_route_id)
+active_id_str = "null" if active_id is None else str(active_id)
 
 map_html = f"""
 <!DOCTYPE html>
@@ -180,26 +187,24 @@ map_html = f"""
             height: 440px;
             margin: 0;
             padding: 0;
-            border-radius: 10px;
+            border-radius: 12px;
         }}
     </style>
 </head>
 <body>
     <div id="map"></div>
     <script>
-        // 기존 뷰포트 상태 보존 (세션 스토리지 활용)
         const savedLat = sessionStorage.getItem('map_lat') || 8.0;
         const savedLng = sessionStorage.getItem('map_lng') || 120.0;
         const savedZoom = sessionStorage.getItem('map_zoom') || 3;
 
         const map = L.map('map').setView([savedLat, savedLng], savedZoom);
 
-        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-            attribution: '&copy; CartoDB',
+        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+            attribution: '&copy; OpenStreetMap contributors',
             maxZoom: 18
         }}).addTo(map);
 
-        // 사용자가 지도를 움직이거나 확대할 때 실시간 좌표 기억
         map.on('moveend', function() {{
             const center = map.getCenter();
             sessionStorage.setItem('map_lat', center.lat);
@@ -208,9 +213,8 @@ map_html = f"""
         }});
 
         const routes = {routes_json};
-        const activeId = {active_id};
+        const activeId = {active_id_str};
 
-        // 거점 항구 마커
         const ports = [
             {{name: "호주 포트헤들랜드 (스포듀민 선적항)", coords: [-20.3167, 118.576]}},
             {{name: "중국 닝보항 (제련 거점 기항)", coords: [29.8683, 121.544]}},
@@ -221,22 +225,21 @@ map_html = f"""
         ports.forEach(p => {{
             L.circleMarker(p.coords, {{
                 radius: 6,
-                fillColor: '#34495e',
+                fillColor: '#1e293b',
                 color: '#ffffff',
                 weight: 2,
                 opacity: 1,
-                fillOpacity: 0.9
+                fillOpacity: 0.95
             }}).bindTooltip(p.name).addTo(map);
         }});
 
-        // 항로 렌더링 (선택 여부에 따라 굵기와 투명도 동적 적용)
         routes.forEach(r => {{
             let isSelected = (activeId !== null && r.id === activeId);
             let isNone = (activeId === null);
 
             let weight = isNone ? 4 : (isSelected ? 6 : 2);
             let opacity = isNone ? 0.85 : (isSelected ? 1.0 : 0.2);
-            let color = (isNone || isSelected) ? r.color : '#bdc3c7';
+            let color = (isNone || isSelected) ? r.color : '#cbd5e1';
 
             let line = L.polyline(r.coords, {{
                 color: color,
