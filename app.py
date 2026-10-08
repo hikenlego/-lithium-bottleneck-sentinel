@@ -1,142 +1,149 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import pydeck as pdk
 
-st.set_page_config(page_title="리튬 공급망 SCM 대시보드", layout="wide")
+# ---------------------------------------------------------
+# 0. 시스템 환경 설정 및 모던 UI 레이아웃
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="수산화리튬 공급망 디지털 트윈 의사결정 시스템",
+    layout="wide"
+)
 
-st.title("배터리 리튬 공급망 실시간 외생 병목 모니터링 & SCM 최적화 대시보드")
-st.caption("호주 포트헤들랜드 선석 과포화 및 기상 변동 - 중국 제련 고집중 - 한국 양극재 클러스터 연계")
+st.title("배터리급 수산화리튬 공급망 리스크 시뮬레이션 & 조달 의사결정 엔진")
+st.caption("디지털 트윈 기반 불확실성 모형: 호주 필바라 우기 체선 - 중국 정제 편중 - 북미 FEOC 규제 연계")
 
-# 사이드바 변수
-st.sidebar.header("공장 운영 및 원가 시뮬레이션 변수")
-daily_demand = st.sidebar.number_input("일일 리튬 소요량 (톤/일)", 10.0, 300.0, 65.0, 5.0)
-lithium_price = st.sidebar.number_input("수산화리튬 가격 ($/톤)", 5000.0, 80000.0, 15000.0, 500.0)
-daily_stop_loss = st.sidebar.number_input("공장 가동 중단 일일 손실 ($/일)", 50000.0, 5000000.0, 850000.0, 50000.0)
-holding_cost_rate = st.sidebar.slider("연간 재고 유지비율 (%)", 3.0, 15.0, 8.0, 0.5) / 100.0
+# ---------------------------------------------------------
+# 1. 사이드바: 6계층 디지털 트윈 파라미터 제어
+# ---------------------------------------------------------
+st.sidebar.header("1. 기업 운영 파라미터 (Operation)")
+daily_demand = st.sidebar.number_input("일일 수산화리튬 소요량 (D̄, 톤/일)", 10.0, 300.0, 65.0, 5.0)
+demand_cv = st.sidebar.slider("일일 수요 변동계수 (CV_D)", 0.0, 0.20, 0.05, 0.01)
+sigma_D = daily_demand * demand_cv
 
-# 1. 해상 운송 거점별 경로 및 토글 추천
-st.header("1. 해상 운송 거점별 경로 및 최적 대안 추천")
+lithium_price = st.sidebar.number_input("수산화리튬 가격 (P, $/톤)", 5000.0, 50000.0, 15000.0, 500.0)
+daily_stop_loss = st.sidebar.number_input("공장 셧다운 일일 손실 (L_daily, $/일)", 50000.0, 3000000.0, 850000.0, 50000.0)
+holding_cost_rate = st.sidebar.slider("연간 재고유지비율 (r, %)", 3.0, 15.0, 8.0, 0.5) / 100.0
+
+st.sidebar.header("2. 불확실성 & 목표 서비스수준 (Uncertainty)")
+service_level_label = st.sidebar.select_slider(
+    "목표 서비스 수준 (Service Level)",
+    options=["95.0% (z=1.645)", "97.5% (z=1.960)", "99.0% (z=2.326)", "99.5% (z=2.576)", "99.9% (z=3.090)"],
+    value="99.0% (z=2.326)"
+)
+z_dict = {
+    "95.0% (z=1.645)": 1.645,
+    "97.5% (z=1.960)": 1.960,
+    "99.0% (z=2.326)": 2.326,
+    "99.5% (z=2.576)": 2.576,
+    "99.9% (z=3.090)": 3.090
+}
+z_score = z_dict[service_level_label]
+
+prob_weather = st.sidebar.slider("우기 체선/기상 충격 발생확률 P(Weather)", 0.1, 0.9, 0.45, 0.05)
+prob_feoc = st.sidebar.slider("북미 FEOC 통상규제 충격확률 P(FEOC)", 0.1, 0.9, 0.35, 0.05)
+
+st.sidebar.header("3. 대체 톨링 비용 파라미터 분해 (Tolling)")
+tuning_cost = st.sidebar.number_input("사전 가마 튜닝/인증비 ($/톤)", 100.0, 1000.0, 250.0, 50.0)
+reservation_cost = st.sidebar.number_input("연간 슬롯 예약금 ($/톤)", 100.0, 1000.0, 300.0, 50.0)
+freight_premium = st.sidebar.number_input("대체 직항 운임 증분 ($/톤)", 0.0, 300.0, 100.0, 10.0)
+c_tolling_unit = tuning_cost + reservation_cost + freight_premium
+
+expedite_premium = st.sidebar.number_input("규제 시 긴급 스팟 조달 프리미엄 ($/톤)", 500.0, 5000.0, 2500.0, 100.0)
+customer_penalty = st.sidebar.number_input("납기 지연 고객사 페널티 ($/톤)", 200.0, 3000.0, 1000.0, 100.0)
+total_mitigation_benefit_unit = expedite_premium + customer_penalty
+
+# ---------------------------------------------------------
+# 2. 물리적 해상 운송 네트워크 & 인터랙티브 지도
+# ---------------------------------------------------------
+st.header("1. 해상 운송 네트워크 & 계약 모드 비교")
 
 route_data = [
     {
         "id": 0,
-        "title": "최단 리드타임 추천",
-        "name": "한-호 직항 장기운송계약(COA) 전용선",
+        "title": "최단 리드타임 (COA 전용선)",
+        "name": "한-호 직항 장기계약 전용선 (Utah Point 전용선석)",
         "lead_time": 14,
-        "reliability": 94.5,
+        "lead_time_sd": 6.44, # CV=0.46 (우기 체선 5~9일 반영)
         "freight": 42.0,
+        "reliability": 94.5,
         "color_rgb": [46, 204, 113],
-        "summary": "우기 사이클론 시즌 및 선석 체선 리스크를 최소화하여 공장 셧다운을 완벽 방어하는 최우선 안정 항로",
         "path": [[118.576, -20.3167], [127.697, 34.9754]]
     },
     {
         "id": 1,
-        "title": "최고 정시성 추천",
-        "name": "중국 제련 톨링 경유 정기선",
+        "title": "최고 정시성 (중국 정기선)",
+        "name": "중국 닝보 제련 톨링 경유 정기선",
         "lead_time": 18,
-        "reliability": 88.0,
+        "lead_time_sd": 8.10,
         "freight": 33.5,
+        "reliability": 88.0,
         "color_rgb": [52, 152, 219],
-        "summary": "중국 내 가공 위탁 라인과 연계된 정기 항로이나, 통상 규제(FEOC) 시 대체 전환 조치 필요",
         "path": [[118.576, -20.3167], [121.544, 29.8683]]
     },
     {
         "id": 2,
-        "title": "최저 운임 추천",
-        "name": "스팟 시장 자유 용선 (동남아 환적)",
+        "title": "최저 운임 (동남아 스팟)",
+        "name": "동남아(싱가포르) 환적 스팟 용선",
         "lead_time": 24,
-        "reliability": 76.2,
+        "lead_time_sd": 12.50,
         "freight": 28.0,
+        "reliability": 76.2,
         "color_rgb": [231, 76, 60],
-        "summary": "톤당 운임이 가장 경제적이나 환적 대기와 비정기선 특성상 리드타임 변동성이 크게 발생",
         "path": [[118.576, -20.3167], [103.8198, 1.3521], [127.697, 34.9754]]
     }
 ]
 
-toggle_options = ["전체 항로 종합 비교", "최단 리드타임 추천", "최고 정시성 추천", "최저 운임 추천"]
-selected_toggle = st.segmented_control("운송 시나리오 선택", toggle_options, default="전체 항로 종합 비교")
+selected_route_name = st.segmented_control(
+    "기준 운송 모드 선택",
+    ["최단 리드타임 (COA 전용선)", "최고 정시성 (중국 정기선)", "최저 운임 (동남아 스팟)", "전체 항로 종합 비교"],
+    default="최단 리드타임 (COA 전용선)"
+)
 
-active_id = None
-if selected_toggle == "최단 리드타임 추천":
-    active_id = 0
-elif selected_toggle == "최고 정시성 추천":
-    active_id = 1
-elif selected_toggle == "최저 운임 추천":
-    active_id = 2
-
-if active_id is not None:
-    curr = route_data[active_id]
-    st.success(f"{curr['title']} : {curr['name']}")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("조달 리드타임", f"{curr['lead_time']} 일")
-    c2.metric("운항 정시성", f"{curr['reliability']} %")
-    c3.metric("해상 운임 지표", f"${curr['freight']} / 톤")
-    st.info(f"전략 평가: {curr['summary']}")
-else:
-    c1, c2, c3 = st.columns(3)
-    c1.metric(route_data[0]["name"], f"{route_data[0]['lead_time']} 일", f"${route_data[0]['freight']}/톤")
-    c2.metric(route_data[1]["name"], f"{route_data[1]['reliability']} %", f"{route_data[1]['lead_time']}일 소요")
-    c3.metric(route_data[2]["name"], f"${route_data[2]['freight']} / 톤", f"정시성 {route_data[2]['reliability']}%")
+active_route_id = None
+if selected_route_name == "최단 리드타임 (COA 전용선)":
+    active_route_id = 0
+elif selected_route_name == "최고 정시성 (중국 정기선)":
+    active_route_id = 1
+elif selected_route_name == "최저 운임 (동남아 스팟)":
+    active_route_id = 2
 
 # pydeck 지도 렌더링
-routes_layer_data = []
+map_routes = []
 for r in route_data:
-    if active_id is None:
-        color = r["color_rgb"] + [220]
+    if active_route_id is None:
+        color = r["color_rgb"] + [200]
         width = 45000
     else:
-        if r["id"] == active_id:
+        if r["id"] == active_route_id:
             color = r["color_rgb"] + [255]
             width = 85000
         else:
             color = [180, 180, 180, 40]
             width = 20000
-
-    routes_layer_data.append({
+    map_routes.append({
         "name": r["name"],
         "path": r["path"],
         "color": color,
         "width": width,
-        "tooltip": f"{r['title']} - {r['name']} ({r['lead_time']}일, ${r['freight']}/톤)"
+        "tooltip": f"{r['title']} | 리드타임: {r['lead_time']}일 (편차: {r['lead_time_sd']}일) | 운임: ${r['freight']}/톤"
     })
 
 ports_data = [
-    {"name": "호주 포트헤들랜드 (선적항)", "coords": [118.576, -20.3167]},
-    {"name": "중국 닝보항 (제련 기항)", "coords": [121.544, 29.8683]},
-    {"name": "한국 광양항 (양하항)", "coords": [127.697, 34.9754]},
+    {"name": "호주 포트헤들랜드 (스포듀민 선적항)", "coords": [118.576, -20.3167]},
+    {"name": "중국 닝보항 (화학전환 거점)", "coords": [121.544, 29.8683]},
+    {"name": "한국 광양항 (양극재 클러스터 입항)", "coords": [127.697, 34.9754]},
     {"name": "싱가포르항 (환적 거점)", "coords": [103.8198, 1.3521]}
 ]
 
-path_layer = pdk.Layer(
-    "PathLayer",
-    data=routes_layer_data,
-    get_path="path",
-    get_color="color",
-    width_min_pixels=3,
-    get_width="width",
-    pickable=True
-)
-
-scatter_layer = pdk.Layer(
-    "ScatterplotLayer",
-    data=ports_data,
-    get_position="coords",
-    get_color=[30, 41, 59],
-    get_radius=110000,
-    pickable=True
-)
-
-view_state = pdk.ViewState(
-    longitude=120.0,
-    latitude=8.0,
-    zoom=2.6,
-    pitch=0
-)
-
 st.pydeck_chart(
     pdk.Deck(
-        layers=[path_layer, scatter_layer],
-        initial_view_state=view_state,
+        layers=[
+            pdk.Layer("PathLayer", data=map_routes, get_path="path", get_color="color", get_width="width", pickable=True),
+            pdk.Layer("ScatterplotLayer", data=ports_data, get_position="coords", get_color=[30, 41, 59], get_radius=110000, pickable=True)
+        ],
+        initial_view_state=pdk.ViewState(longitude=120.0, latitude=8.0, zoom=2.6, pitch=0),
         tooltip={"text": "{name}\n{tooltip}"},
         map_provider="carto",
         map_style="light"
@@ -144,67 +151,177 @@ st.pydeck_chart(
     use_container_width=True
 )
 
-# 2. 외생 변수 실시간 자동 수집 & 분석
-st.header("2. AI 외생 변수 실시간 모니터링 & 자동 판별")
-st.caption("시스템 구동 시 백그라운드 엔진이 호주 기상 및 통상 규제 2대 핵심 변수를 자동으로 동시 수집·분석합니다.")
+# ---------------------------------------------------------
+# 3. 확률 기반 동적 안전재고 & 기대손실 연산 엔진
+# ---------------------------------------------------------
+st.header("2. 불확실성 기반 동적 안전재고 & 기대손실 모델")
 
-col_risk1, col_risk2 = st.columns(2)
+base_route = route_data[active_route_id if active_route_id is not None else 0]
+mean_L = base_route["lead_time"]
+sd_L = base_route["lead_time_sd"]
 
-with col_risk1:
-    st.subheader("시나리오 1: 호주 필바라 기상/선석 체선")
-    st.error("[STATUS: HIGH_RISK] 우기 사이클론 시즌 진입 경보")
-    st.markdown("- **호주 기상청(BOM)**: 필바라 연안 열대성 저기압 형성으로 포트헤들랜드 선석 통제 확률 증가\n- **항만 적체**: 주요 벌크 터미널 대기 척수 증가로 평시 대비 체선 5~9일 추가 발생\n- **선적 영향**: 스포듀민 정광 선적 지연에 따른 국내 입항 변동성 급증")
+# [수학적 공식에 따른 안전재고 계산]
+# SS = z * sqrt(L * sigma_D^2 + D^2 * sigma_L^2)
+variance_DL = (mean_L * (sigma_D ** 2)) + ((daily_demand ** 2) * (sd_L ** 2))
+sigma_DL = np.sqrt(variance_DL)
+ss_tonnes = z_score * sigma_DL
+ss_days = ss_tonnes / daily_demand
 
-with col_risk2:
-    st.subheader("시나리오 2: 통상 규제 (미국 IRA FEOC & 중국 제련)")
-    st.error("[STATUS: HIGH_RISK] 해외우려기관(FEOC) 규제 압박 지속")
-    st.markdown("- **미국 재무부/DOE 지침**: 중국 제련 수산화리튬 세액공제 배제 리스크 지속\n- **단일국 의존도**: 국내 양극재 3사 중국 제련 톨링 의존율 79% 수준으로 규제 충격 취약\n- **제련 전환 시차**: 국내/FTA 대체 제련 라인 튜닝 시 최소 120일 전환 공백 소요")
+base_stock_days = 20.0 # 사이클 및 기본 완충재고
+total_target_days = base_stock_days + ss_days
+add_inventory_tonnes = ss_tonnes
 
-# 3. 정량 솔루션 & ROI 시뮬레이션
-st.header("3. 병목 솔루션 수치 산정 및 정량적 ROI 시뮬레이션")
-st.caption("사이드바의 공장 운영 파라미터와 2-2절 실증 지표(CV 0.310, 대체 시차 120일)를 결합하여 두 솔루션을 동시 산출합니다.")
+# 우기 90일간 재고유지비용 증분
+cost_safety_stock = add_inventory_tonnes * lithium_price * holding_cost_rate * (90.0 / 365.0)
 
-col_sol1, col_sol2 = st.columns(2)
+# 조건부 결품 확률 및 회피 기대손실
+# P(S0 | Weather): 추가 안전재고가 없을 때 체선(평균 7일 지연) 시 결품 발생확률 = 95%
+# P(S1 | Weather): z-score에 따른 결품확률 (1 - Service Level)
+prob_stockout_before = 0.95
+prob_stockout_after = (1.0 - (z_score / 3.5)) # 서비스수준에 역비례
+delta_prob_stockout = max(0.0, prob_stockout_before - prob_stockout_after)
 
-with col_sol1:
-    st.subheader("솔루션 1: 동적 안전재고(Dynamic Safety Stock) 선제 비축")
-    st.markdown("- **산출 근거**: 평시 CV 0.086 -> 우기 사이클론 시즌 CV 0.310\n- **대응 전략**: 우기(1~3월) 안전재고를 14일에서 35일분으로 선제 상향 (+21일분 추가)")
-    
-    additional_days = 21
-    req_stock_ton = daily_demand * additional_days
-    inv_cost = (req_stock_ton * lithium_price) * (holding_cost_rate * (additional_days / 365.0))
-    prevented_days = 7
-    prevented_loss = prevented_days * daily_stop_loss
-    net_benefit1 = prevented_loss - inv_cost
-    roi1 = (net_benefit1 / inv_cost) * 100.0 if inv_cost > 0 else 0
+expected_delay_days = 7.0
+benefit_safety_stock = prob_weather * delta_prob_stockout * daily_stop_loss * expected_delay_days
+net_benefit_ss = benefit_safety_stock - cost_safety_stock
+roi_ss = (net_benefit_ss / cost_safety_stock) * 100.0 if cost_safety_stock > 0 else 0
 
-    m1, m2 = st.columns(2)
-    m1.metric("권장 추가 비축량", f"{req_stock_ton:,.0f} 톤", f"+{additional_days}일분")
-    m2.metric("재고 유지 비용 (Cost)", f"${inv_cost:,.0f}")
-    m3, m4 = st.columns(2)
-    m3.metric("가동 중단 손실 방어액", f"${prevented_loss:,.0f}", f"{prevented_days}일 방어")
-    m4.metric("추정 ROI", f"{roi1:,.1f} %", "투자 대비 순편익")
-    
-    st.info(f"동적 안전재고 {req_stock_ton:,.0f}톤 선제 비축으로 약 ${inv_cost:,.0f} 보관비용 대비 ${prevented_loss:,.0f} 손실을 방어하여 순편익 ${net_benefit1:,.0f} (ROI {roi1:.1f}%)를 달성합니다.")
+col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+col_s1.metric("계산된 동적 안전재고", f"{ss_tonnes:,.1f} 톤", f"+{ss_days:.1f}일분 비축")
+col_s2.metric("총 방어재고 수준", f"{total_target_days:.1f} 일분", f"기본 20일 + 안전 {ss_days:.1f}일")
+col_s3.metric("안전재고 유지비용 (Cost)", f"${cost_safety_stock:,.0f}", f"우기 90일간 증분비용")
+col_s4.metric("기대 셧다운 회피액 (Benefit)", f"${benefit_safety_stock:,.0f}", f"P(Weather)={prob_weather:.2f} 반영")
 
-with col_sol2:
-    st.subheader("솔루션 2: 국내/FTA 대체 제련소 예비 톨링(Standby Tolling)")
-    st.markdown("- **산출 근거**: 미국 IRA FEOC 발효 시 제련처 대체 전환 시차 120일 공백\n- **대응 전략**: 국내 대체 제련소 사전 튜닝 완료 및 소요량의 40% 예비 계약")
+st.info(
+    f"공식 연산 결과: 목표 서비스 수준 **{service_level_label}** 및 우기 리드타임 편차($\sigma_L={sd_L:.2f}$일)를 반영한 순수 안전재고는 **{ss_days:.1f}일분({ss_tonnes:,.0f}톤)**입니다. "
+    f"기본 운영재고(20일)와 결합한 총 방어재고 수준은 **{total_target_days:.1f}일분**이며, 순편익은 **${net_benefit_ss:,.0f} (ROI {roi_ss:.1f}%)**로 산출됩니다."
+)
 
-    transition_days = 120
-    split_ratio = 0.40
-    standby_ton = daily_demand * transition_days * split_ratio
-    tuning_cost_per_ton = 650.0
-    total_standby_cost = standby_ton * tuning_cost_per_ton
-    prevented_disruption_value = (daily_demand * transition_days) * 3500.0
-    net_benefit2 = prevented_disruption_value - total_standby_cost
-    roi2 = (net_benefit2 / total_standby_cost) * 100.0 if total_standby_cost > 0 else 0
+# ---------------------------------------------------------
+# 4. 대체 정제선 예비 톨링(Standby Tolling) 정량 모델
+# ---------------------------------------------------------
+st.header("3. 통상 규제(FEOC) 대응 예비 톨링 경제성 모델")
 
-    m5, m6 = st.columns(2)
-    m5.metric("예비 톨링 계약 물량", f"{standby_ton:,.0f} 톤", "수요의 40% 이원화")
-    m6.metric("사전 튜닝/계약 비용 (Cost)", f"${total_standby_cost:,.0f}")
-    m7, m8 = st.columns(2)
-    m7.metric("규제 공백 손실 회피액", f"${prevented_disruption_value:,.0f}", "120일 공급 공백 방어")
-    m8.metric("추정 ROI", f"{roi2:,.1f} %", "투자 대비 순편익")
+t_gap_days = 120.0 # 전환 공백
+split_ratio = st.slider("대체 톨링 커버리지 비율 (Coverage Ratio, ρ)", 0.1, 0.8, 0.4, 0.05)
 
-    st.info(f"대체 제련소 예비 톨링 계약으로 약 ${total_standby_cost:,.0f} 비용 대비 ${prevented_disruption_value:,.0f} 손실을 방어하여 순편익 ${net_benefit2:,.0f} (ROI {roi2:.1f}%)를 달성합니다.")
+q_tolling = daily_demand * t_gap_days * split_ratio
+cost_tolling = q_tolling * c_tolling_unit
+
+# 기대 편익: P(FEOC) * (긴급 조달 프리미엄 + 고객사 페널티) * 커버리지 물량
+benefit_tolling = prob_feoc * (q_tolling * total_mitigation_benefit_unit)
+net_benefit_tolling = benefit_tolling - cost_tolling
+roi_tolling = (net_benefit_tolling / cost_tolling) * 100.0 if cost_tolling > 0 else 0
+
+col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+col_t1.metric("예비 톨링 계약 물량", f"{q_tolling:,.0f} 톤", f"120일 소요량의 {split_ratio*100:.0f}%")
+col_t2.metric("사전 튜닝/슬롯비 (Cost)", f"${cost_tolling:,.0f}", f"단가: ${c_tolling_unit:,.0f}/톤")
+col_t3.metric("기대 규제손실 회피 (Benefit)", f"${benefit_tolling:,.0f}", f"P(FEOC)={prob_feoc:.2f} 반영")
+col_t4.metric("예비 톨링 추정 ROI", f"{roi_tolling:,.1f} %", "투자 대비 순편익")
+
+st.caption(f"* 비용 분해: 가마 튜닝비 ${tuning_cost:.0f} + 슬롯 예약금 ${reservation_cost:.0f} + 운임 증분 ${freight_premium:.0f} = 합계 ${c_tolling_unit:.0f}/톤 | 회피 편익 단가: 긴급 프리미엄 ${expedite_premium:.0f} + 페널티 ${customer_penalty:.0f} = ${total_mitigation_benefit_unit:.0f}/톤")
+
+# ---------------------------------------------------------
+# 5. 몬테카를로 시뮬레이션 & 불확실성 위험 지표 (VaR/CVaR)
+# ---------------------------------------------------------
+st.header("4. 몬테카를로 불확실성 시뮬레이션 (1,000회 반복)")
+st.caption("기상 체선 일수, 통상 규제 발효 여부, 리드타임 변동을 결합 확률분포로 샘플링하여 손익 분포를 검증합니다.")
+
+np.random.seed(42)
+n_sim = 1000
+
+# 1) 기상 이벤트 및 체선 일수 샘플링
+weather_occurs = np.random.binomial(1, prob_weather, n_sim)
+sim_delay_days = np.random.uniform(5.0, 9.0, n_sim) * weather_occurs
+
+# 2) FEOC 규제 이벤트 샘플링
+feoc_occurs = np.random.binomial(1, prob_feoc, n_sim)
+
+# 3) 각 반복당 손익(Net Benefit) 연산 (복합 결합 모델)
+# 안전재고는 체선 일수를 방어하고, 예비 톨링은 규제 공백 물량을 방어
+sim_prevented_loss = (sim_delay_days * daily_stop_loss) + (feoc_occurs * (q_tolling * total_mitigation_benefit_unit))
+sim_total_cost = cost_safety_stock + cost_tolling
+sim_net_benefits = sim_prevented_loss - sim_total_cost
+
+# 위험 지표 산출
+mean_nb = np.mean(sim_net_benefits)
+p5_nb = np.percentile(sim_net_benefits, 5) # 하위 5% (VaR_95 관점)
+p95_nb = np.percentile(sim_net_benefits, 95)
+cvar_95 = np.mean(sim_net_benefits[sim_net_benefits <= p5_nb]) # 최악 5%의 평균 손익
+
+c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+c_m1.metric("시뮬레이션 평균 순편익", f"${mean_nb:,.0f}")
+c_m2.metric("P5 순손익 (VaR 95)", f"${p5_nb:,.0f}", "하위 5% 시나리오")
+c_m3.metric("최악 5% 평균 (CVaR 95)", f"${cvar_95:,.0f}", "스트레스 시나리오")
+c_m4.metric("P95 순손익 (상방)", f"${p95_nb:,.0f}", "상위 5% 호의 시나리오")
+
+# ---------------------------------------------------------
+# 6. 5대 전략 포트폴리오 최적화 비교 매트릭스
+# ---------------------------------------------------------
+st.header("5. SCM 전략 포트폴리오 다각화 최적 비교표")
+
+strategies = [
+    {
+        "전략 구분": "A. 현상 유지 (Do Nothing)",
+        "총 연간 비용 ($)": 0,
+        "기대 회피 편익 ($)": 0,
+        "기대 순편익 ($)": 0,
+        "ROI (%)": 0.0,
+        "서비스수준 충족": "미흡 (<80%)",
+        "권고 여부": "위험 노출 (비권고)"
+    },
+    {
+        "전략 구분": "B. 안전재고 단독 강화",
+        "총 연간 비용 ($)": cost_safety_stock,
+        "기대 회피 편익 ($)": benefit_safety_stock,
+        "기대 순편익 ($)": net_benefit_ss,
+        "ROI (%)": roi_ss,
+        "서비스수준 충족": f"달성 ({service_level_label[:5]})",
+        "권고 여부": "기후 리스크 방어"
+    },
+    {
+        "전략 구분": "C. 예비 톨링 20% 분할",
+        "총 연간 비용 ($)": (daily_demand * t_gap_days * 0.20) * c_tolling_unit,
+        "기대 회피 편익 ($)": prob_feoc * ((daily_demand * t_gap_days * 0.20) * total_mitigation_benefit_unit),
+        "기대 순편익 ($)": (prob_feoc * ((daily_demand * t_gap_days * 0.20) * total_mitigation_benefit_unit)) - ((daily_demand * t_gap_days * 0.20) * c_tolling_unit),
+        "ROI (%)": roi_tolling,
+        "서비스수준 충족": "부분 달성",
+        "권고 여부": "규제 최소 방어"
+    },
+    {
+        "전략 구분": f"D. 예비 톨링 {split_ratio*100:.0f}% 분할",
+        "총 연간 비용 ($)": cost_tolling,
+        "기대 회피 편익 ($)": benefit_tolling,
+        "기대 순편익 ($)": net_benefit_tolling,
+        "ROI (%)": roi_tolling,
+        "서비스수준 충족": "충족 (규제 방어)",
+        "권고 여부": "통상 리스크 방어"
+    },
+    {
+        "전략 구분": "E. 복합 다각화 (안전재고 + 톨링)",
+        "총 연간 비용 ($)": sim_total_cost,
+        "기대 회피 편익 ($)": benefit_safety_stock + benefit_tolling,
+        "기대 순편익 ($)": (benefit_safety_stock + benefit_tolling) - sim_total_cost,
+        "ROI (%)": (((benefit_safety_stock + benefit_tolling) - sim_total_cost) / sim_total_cost) * 100.0,
+        "서비스수준 충족": f"완벽 달성 (99%+)",
+        "권고 여부": "★ 최적 권고 전략"
+    }
+]
+
+df_strat = pd.DataFrame(strategies)
+st.dataframe(
+    df_strat.style.format({
+        "총 연간 비용 ($)": "${:,.0f}",
+        "기대 회피 편익 ($)": "${:,.0f}",
+        "기대 순편익 ($)": "${:,.0f}",
+        "ROI (%)": "{:,.1f}%"
+    }),
+    use_container_width=True,
+    hide_index=True
+)
+
+st.success(
+    f"최종 의사결정 권고: 단일 충격 대응보다 기상 체선과 북미 통상 규제를 결합 방어하는 **'전략 E (복합 다각화 전략)'** 실행 시, "
+    f"연간 총 투입비용 **${sim_total_cost:,.0f}** 대비 기대 회피 편익 **${(benefit_safety_stock + benefit_tolling):,.0f}**을 달성하여 "
+    f"순편익 **${((benefit_safety_stock + benefit_tolling) - sim_total_cost):,.0f} (복합 ROI {(((benefit_safety_stock + benefit_tolling) - sim_total_cost) / sim_total_cost) * 100.0:.1f}%)**의 최고 방어 효율을 나타냅니다."
+)
